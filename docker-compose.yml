@@ -1,0 +1,349 @@
+x-logging: &default-logging
+  driver: "json-file"
+  options:
+    max-size: "10m"
+    max-file: "3"
+
+services:
+  traefik:
+    image: traefik:v2.11.7
+    container_name: traefik
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    command:
+      - "--api.dashboard=true"
+      - "--api.insecure=true"
+      - "--providers.docker.endpoint=unix:///var/run/docker.sock"
+      - "--providers.docker.exposedbydefault=false"
+      - "--providers.docker.network=network_public"
+      - "--entrypoints.web.address=:80"
+      - "--entrypoints.websecure.address=:443"
+      - "--certificatesresolvers.letsencryptresolver.acme.httpchallenge=true"
+      - "--certificatesresolvers.letsencryptresolver.acme.httpchallenge.entrypoint=web"
+      - "--certificatesresolvers.letsencryptresolver.acme.email=${EMAIL}"
+      - "--certificatesresolvers.letsencryptresolver.acme.storage=/letsencrypt/acme.json"
+      - "--log.level=INFO"
+      - "--log.format=common"
+      - "--log.filePath=/var/log/traefik/traefik.log"
+      - "--accesslog=true"
+      - "--accesslog.filepath=/var/log/traefik/access-log"
+      - "--ping=true"
+      - "--ping.entrypoint=ping"
+      - "--entryPoints.ping.address=:8082"
+      - "--global.checkNewVersion=false"
+      - "--global.sendAnonymousUsage=false"
+    volumes:
+      - "/var/run/docker.sock:/var/run/docker.sock:ro"
+      - "traefik_letsencrypt:/letsencrypt"
+    ports:
+      - "80:80"
+      - "443:443"
+    networks:
+      - network_public
+    healthcheck:
+      test: ["CMD", "wget", "http://localhost:8082/ping", "--spider"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    logging: *default-logging
+
+  whaticket-postgres:
+    image: postgres:16.10
+    container_name: whaticket-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${DB_USER}
+      POSTGRES_PASSWORD: ${DB_PASS}
+      POSTGRES_DB: ${DB_NAME}
+      PGTZ: America/Sao_Paulo
+      TZ: America/Sao_Paulo
+    command: [
+        "postgres",
+        # Conexões e Performance Geral
+        "--max_connections=150",
+        "--shared_buffers=1GB",
+        "--effective_cache_size=3GB",
+        "--work_mem=32MB",
+        "--maintenance_work_mem=512MB",
+        # WAL e Checkpoint
+        "--wal_level=minimal",
+        "--max_wal_senders=0",
+        "--wal_buffers=32MB",
+        "--checkpoint_completion_target=0.9",
+        "--checkpoint_timeout=15min",
+        # Estatísticas e Monitoramento
+        "--shared_preload_libraries=pg_stat_statements",
+        "--default_statistics_target=100",
+        # Otimizações para SSD
+        "--random_page_cost=1.1",
+        "--effective_io_concurrency=200",
+        # Planner e Query
+        "--cpu_tuple_cost=0.01",
+        "--cpu_index_tuple_cost=0.005",
+        "--cpu_operator_cost=0.0025",
+        # Paralelismo
+        "--max_parallel_workers_per_gather=2",
+        "--max_parallel_workers=4",
+        "--max_worker_processes=4",
+        # Autovacuum Otimizado
+        "--autovacuum_max_workers=3",
+        "--autovacuum_naptime=10s",
+        "--autovacuum_vacuum_cost_limit=500",
+      ]
+    volumes:
+      - postgres_volume:/var/lib/postgresql/data
+    networks:
+      - network_public
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER} -d ${DB_NAME}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    logging: *default-logging
+
+  whaticket-pgbouncer:
+    image: edoburu/pgbouncer
+    container_name: whaticket-pgbouncer
+    restart: unless-stopped
+    environment:
+      DB_USER: ${DB_USER}
+      DB_PASSWORD: ${DB_PASS}
+      TZ: America/Sao_Paulo
+    depends_on:
+      whaticket-postgres:
+        condition: service_healthy
+    volumes:
+      - ./config/pgbouncer/pgbouncer.ini:/etc/pgbouncer/pgbouncer.ini:ro
+      - ./config/pgbouncer/userlist.txt:/etc/pgbouncer/userlist.txt:ro
+    networks:
+      - network_public
+    logging: *default-logging
+
+  whaticket-redis:
+    image: valkey/valkey:7.2-alpine
+    container_name: whaticket-redis
+    restart: unless-stopped
+    command:
+      [
+        "valkey-server",
+        "--requirepass",
+        "${REDIS_PASSWORD}",
+        "--appendonly",
+        "yes",
+        "--appendfsync",
+        "everysec",
+        "--auto-aof-rewrite-percentage",
+        "100",
+        "--auto-aof-rewrite-min-size",
+        "64mb",
+        "--io-threads",
+        "4",
+        "--io-threads-do-reads",
+        "yes",
+        "--maxclients",
+        "10000",
+        "--tcp-backlog",
+        "511",
+        "--tcp-keepalive",
+        "300",
+        "--timeout",
+        "0",
+        "--maxmemory-policy",
+        "noeviction",
+        "--save",
+        "900",
+        "1",
+        "--save",
+        "300",
+        "10",
+        "--save",
+        "60",
+        "10000",
+        "--notify-keyspace-events",
+        "Ex",
+        "--hash-max-ziplist-entries",
+        "512",
+        "--hash-max-ziplist-value",
+        "64",
+        "--list-max-ziplist-size",
+        "-2",
+        "--set-max-intset-entries",
+        "512",
+      ]
+    environment:
+      REDIS_PASSWORD: ${REDIS_PASSWORD}
+      TZ: America/Sao_Paulo
+    volumes:
+      - redis_volume:/data
+    networks:
+      - network_public
+    healthcheck:
+      test: ["CMD-SHELL", "valkey-cli -a ${REDIS_PASSWORD} ping | grep PONG"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    ulimits:
+      nofile:
+        soft: 50000
+        hard: 100000
+    logging: *default-logging
+
+  whaticket-rabbitmq:
+    image: rabbitmq:3.13-management
+    container_name: whaticket-rabbitmq
+    restart: unless-stopped
+    environment:
+      RABBITMQ_DEFAULT_USER: ${RABBIT_USER}
+      RABBITMQ_DEFAULT_PASS: ${RABBIT_PASS}
+      TZ: America/Sao_Paulo
+    volumes:
+      - ./config/rabbitmq/rabbitmq.conf:/etc/rabbitmq/rabbitmq.conf:ro
+      - rabbitmq_volume:/var/lib/rabbitmq
+    networks:
+      - network_public
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    ulimits:
+      nofile:
+        soft: 65536
+        hard: 65536
+    logging: *default-logging
+
+  backend:
+    image: ghcr.io/${GHCR_IMAGE_USER}/${GHCR_IMAGE_REPO}/backend:${DOCKER_TAG}
+    pull_policy: always
+    container_name: backend
+    restart: unless-stopped
+    command: >
+      /bin/bash -c "
+      ln -sf /usr/share/zoneinfo/America/Sao_Paulo /etc/localtime;
+      npx sequelize db:migrate;
+      npx sequelize db:seed:all;
+      node dist/server.js
+      "
+    environment:
+      # AMBIENTE
+      - NODE_ENV=${NODE_ENV}
+      # URLS E PORTAS
+      - BACKEND_URL=${BACKEND_URL}
+      - FRONTEND_URL=${FRONTEND_URL}
+      - PORT=8080
+      - PROXY_PORT=443
+      # LOGS
+      - LOG_LEVEL=info
+      # GERAL
+      - TIMEOUT_TO_IMPORT_MESSAGE=${TIMEOUT_TO_IMPORT_MESSAGE}
+      # SEGURANÇA e AUTENTICAÇÃO
+      - JWT_SECRET=${JWT_SECRET}
+      - JWT_REFRESH_SECRET=${JWT_REFRESH_SECRET}
+      - COMPANY_TOKEN=${COMPANY_TOKEN}
+      - ENV_TOKEN=OPLANOV2
+      - MASTER_KEY=${MASTER_KEY}
+      # BAILEYS
+      - BAILEYS_LOG_LEVEL=error
+      - WA_WSOCKETVERSION=${WA_WSOCKETVERSION}
+      - SESSIONS_DIR=./private
+      # BANCO DE DADOS
+      - DB_DIALECT=${DB_DIALECT}
+      - DB_HOST=whaticket-pgbouncer
+      - DB_PORT=6432
+      - DB_USER=${DB_USER}
+      - DB_PASS=${DB_PASS}
+      - DB_NAME=${DB_NAME}
+      # REDIS
+      - REDIS_HOST=whaticket-redis
+      - REDIS_PORT=6379
+      - REDIS_URI=redis://:${REDIS_PASSWORD}@whaticket-redis:6379
+      # MESSAGERIA
+      - RABBITMQ_HOST=whaticket-rabbitmq
+      - RABBITMQ_PORT=5672
+      - RABBITMQ_URI=amqp://${RABBIT_USER}:${RABBIT_PASS}@whaticket-rabbitmq:5672
+      - RABBITMQ_EXCHANGE=messages
+      - RABBITMQ_QUEUE_PREFIX=onticket
+      - RABBITMQ_RETRY_DELAY=3000
+      # FACEBOOK
+      - FACEBOOK_APP_ID=${FACEBOOK_APP_ID}
+      - FACEBOOK_APP_SECRET=${FACEBOOK_APP_SECRET}
+      - VERIFY_TOKEN=${VERIFY_TOKEN}
+      # PAGAMENTOS (opcional)
+      - GERENCIANET_SANDBOX=${GERENCIANET_SANDBOX}
+      - GERENCIANET_CLIENT_ID=${GERENCIANET_CLIENT_ID}
+      - GERENCIANET_CLIENT_SECRET=${GERENCIANET_CLIENT_SECRET}
+      - GERENCIANET_CHAVEPIX=${GERENCIANET_CHAVEPIX}
+      - GERENCIANET_PIX_CERT=${GERENCIANET_PIX_CERT}
+      # GRUPOS
+      - GROUP_META_TTL_MS=300000
+      - GROUP_META_CACHE_MAX=5000
+      - GROUP_META_MIN_INTERVAL_MS=250
+      - GROUP_META_REDIS_ENABLED=true
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.backend.rule=Host(`${BACKEND_DOMAIN}`)"
+      - "traefik.http.routers.backend.entrypoints=websecure"
+      - "traefik.http.routers.backend.tls=true"
+      - "traefik.http.routers.backend.tls.certresolver=letsencryptresolver"
+      - "traefik.http.services.backend.loadbalancer.server.port=8080"
+    volumes:
+      - backend_private:/backend/private
+      - backend_public:/backend/public
+    networks:
+      - network_public
+    # healthcheck:
+    #   test:
+    #     ["CMD-SHELL", "curl -s http://localhost:8080/ | grep -q 'Cannot GET /'"]
+    #   interval: 30s
+    #   timeout: 10s
+    #   retries: 5
+    #   start_period: 120s
+    depends_on:
+      whaticket-postgres:
+        condition: service_healthy
+      whaticket-pgbouncer:
+        condition: service_started
+      whaticket-redis:
+        condition: service_healthy
+      whaticket-rabbitmq:
+        condition: service_healthy
+    logging: *default-logging
+
+  frontend:
+    image: ghcr.io/${GHCR_IMAGE_USER}/${GHCR_IMAGE_REPO}/frontend:${DOCKER_TAG}
+    pull_policy: always
+    container_name: frontend
+    restart: unless-stopped
+    environment:
+      - NODE_ENV=${NODE_ENV}
+      - PORT=3000
+      - REACT_APP_BACKEND_URL=${BACKEND_URL}
+      - REACT_APP_FACEBOOK_APP_ID=${FACEBOOK_APP_ID}
+      - REACT_APP_NUMBER_SUPPORT=${NUMBER_SUPPORT}
+      - REACT_APP_REQUIRE_BUSINESS_MANAGEMENT=${REQUIRE_BUSINESS_MANAGEMENT}
+      - REACT_APP_ENV_TOKEN=OPLANOV2
+      - ENV_TOKEN=OPLANOV2
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.frontend.rule=Host(`${FRONTEND_DOMAIN}`)"
+      - "traefik.http.routers.frontend.entrypoints=websecure"
+      - "traefik.http.routers.frontend.tls=true"
+      - "traefik.http.routers.frontend.tls.certresolver=letsencryptresolver"
+      - "traefik.http.services.frontend.loadbalancer.server.port=3000"
+    networks:
+      - network_public
+    logging: *default-logging
+
+volumes:
+  traefik_letsencrypt:
+  postgres_volume:
+  redis_volume:
+  rabbitmq_volume:
+  backend_private:
+  backend_public:
+
+networks:
+  network_public:
+    driver: bridge
