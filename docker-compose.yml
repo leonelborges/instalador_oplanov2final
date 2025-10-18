@@ -172,7 +172,6 @@ services:
       - MASTER_KEY=${MASTER_KEY}
       # BAILEYS
       - BAILEYS_LOG_LEVEL=error
-      - WA_WSOCKETVERSION=${WA_WSOCKETVERSION}
       - SESSIONS_DIR=./private
       # BANCO DE DADOS
       - DB_DIALECT=${DB_DIALECT}

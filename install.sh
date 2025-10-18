@@ -498,7 +498,6 @@ load_env_file() {
     JWT_REFRESH_SECRET_CURRENT="$JWT_REFRESH_SECRET"
     COMPANY_TOKEN_CURRENT="$COMPANY_TOKEN"
     MASTER_KEY_CURRENT="$MASTER_KEY"
-    CLIENT_REVISION_CURRENT="$CLIENT_REVISION"
     NUMBER_SUPPORT_CURRENT="$NUMBER_SUPPORT"
     REQUIRE_BUSINESS_MANAGEMENT_CURRENT="$REQUIRE_BUSINESS_MANAGEMENT"
 
@@ -563,8 +562,6 @@ COMPANY_TOKEN=${COMPANY_TOKEN}
 MASTER_KEY=${MASTER_KEY}
 
 # --- WhatsApp Client Revision ---
-CLIENT_REVISION=${CLIENT_REVISION}
-WA_WSOCKETVERSION="[2, 3000, ${CLIENT_REVISION}]"
 
 # --- Facebook (Opcional) ---
 FACEBOOK_APP_ID=${FACEBOOK_APP_ID}
@@ -611,25 +608,6 @@ docker_login() {
     echo_success "Login no GitHub Container Registry realizado com sucesso."
   else
     echo_error "Falha no login do GHCR. Verifique o usuário, token e sua conexão com a internet."
-  fi
-}
-
-fetch_and_set_client_revision() {
-  echo_info "Obtendo CLIENT_REVISION do WhatsApp Web..."
-  # shellcheck disable=SC2016
-  LATEST_REVISION=$(node -e 'const https = require("https"); https.get("https://web.whatsapp.com/sw.js", (res) => { let data = ""; res.on("data", (chunk) => { data += chunk; }); res.on("end", () => { const match = data.match(/\\\"client_revision\\\":\s*(\d+)/); if (match && match[1]) { console.log(match[1]); } else { console.error("Nao foi possivel encontrar client_revision"); process.exit(1); } }); }).on("error", (err) => { console.error("Erro ao buscar sw.js:", err); process.exit(1); });' || echo "")
-
-  if [ -n "$LATEST_REVISION" ]; then
-    CLIENT_REVISION="$LATEST_REVISION"
-    echo_success "CLIENT_REVISION obtido: $CLIENT_REVISION"
-  else
-    echo_warning "Não foi possível obter o CLIENT_REVISION automaticamente."
-    if [ -n "$CLIENT_REVISION_CURRENT" ]; then
-      CLIENT_REVISION="$CLIENT_REVISION_CURRENT"
-      echo_info "Usando o valor anterior de CLIENT_REVISION: $CLIENT_REVISION"
-    else
-      prompt_for_variable "CLIENT_REVISION" "  Digite o CLIENT_REVISION manualmente (ou deixe em branco para usar o valor padrão do app)" "" "1023358843"
-    fi
   fi
 }
 
@@ -883,7 +861,6 @@ show_summary_and_confirm() {
   echo "  RabbitMQ (User):        ${COLOR_YELLOW}${RABBIT_USER}${COLOR_RESET}"
   echo "  Redis Password:        ${COLOR_YELLOW}${REDIS_PASSWORD}${COLOR_RESET}"
   echo ""
-  echo "  CLIENT_REVISION:        ${COLOR_YELLOW}${CLIENT_REVISION}${COLOR_RESET}"
   echo "  MASTER_KEY:             ${COLOR_YELLOW}${MASTER_KEY:0:8}... (oculto)${COLOR_RESET}"
   echo "${COLOR_CYAN}========================================================${COLOR_RESET}"
   echo ""
@@ -911,7 +888,6 @@ collect_all_data_new_install() {
   set_rabbitmq_credentials
   set_redis_credentials
   generate_internal_secrets
-  fetch_and_set_client_revision
 }
 
 collect_data_update() {
@@ -965,7 +941,6 @@ collect_data_update() {
   REDIS_PASSWORD=${REDIS_PASSWORD:-$REDIS_PASSWORD_CURRENT}
 
   generate_internal_secrets
-  fetch_and_set_client_revision
 }
 
 run_new_ghcr_installation() {
