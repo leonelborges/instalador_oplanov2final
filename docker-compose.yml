@@ -53,53 +53,19 @@ services:
     container_name: whaticket-postgres
     restart: unless-stopped
     environment:
-      POSTGRES_USER: ${DB_USER}
-      POSTGRES_PASSWORD: ${DB_PASS}
-      POSTGRES_DB: ${DB_NAME}
-      PGTZ: America/Sao_Paulo
-      TZ: America/Sao_Paulo
-    command: [
-        "postgres",
-        # Conexões e Performance Geral
-        "--max_connections=150",
-        "--shared_buffers=1GB",
-        "--effective_cache_size=3GB",
-        "--work_mem=32MB",
-        "--maintenance_work_mem=512MB",
-        # WAL e Checkpoint
-        "--wal_level=minimal",
-        "--max_wal_senders=0",
-        "--wal_buffers=32MB",
-        "--checkpoint_completion_target=0.9",
-        "--checkpoint_timeout=15min",
-        # Estatísticas e Monitoramento
-        "--shared_preload_libraries=pg_stat_statements",
-        "--default_statistics_target=100",
-        # Otimizações para SSD
-        "--random_page_cost=1.1",
-        "--effective_io_concurrency=200",
-        # Planner e Query
-        "--cpu_tuple_cost=0.01",
-        "--cpu_index_tuple_cost=0.005",
-        "--cpu_operator_cost=0.0025",
-        # Paralelismo
-        "--max_parallel_workers_per_gather=2",
-        "--max_parallel_workers=4",
-        "--max_worker_processes=4",
-        # Autovacuum Otimizado
-        "--autovacuum_max_workers=3",
-        "--autovacuum_naptime=10s",
-        "--autovacuum_vacuum_cost_limit=500",
-      ]
+      - POSTGRES_PASSWORD=${DB_PASS}
+      - POSTGRES_USER=${DB_USER}
+      - POSTGRES_DB=${DB_NAME}
     volumes:
       - postgres_volume:/var/lib/postgresql/data
     networks:
       - network_public
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${DB_USER} -d ${DB_NAME}"]
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER} -d ${DB_NAME} -h localhost"]
       interval: 10s
       timeout: 5s
       retries: 5
+      start_period: 30s
     logging: *default-logging
 
   whaticket-pgbouncer:
@@ -121,65 +87,26 @@ services:
     logging: *default-logging
 
   whaticket-redis:
-    image: valkey/valkey:7.2-alpine
+    image: redis:7.2-alpine
     container_name: whaticket-redis
     restart: unless-stopped
     command:
       [
-        "valkey-server",
+        "redis-server",
         "--requirepass",
         "${REDIS_PASSWORD}",
         "--appendonly",
         "yes",
-        "--appendfsync",
-        "everysec",
-        "--auto-aof-rewrite-percentage",
-        "100",
-        "--auto-aof-rewrite-min-size",
-        "64mb",
-        "--io-threads",
-        "4",
-        "--io-threads-do-reads",
-        "yes",
-        "--maxclients",
-        "10000",
-        "--tcp-backlog",
-        "511",
-        "--tcp-keepalive",
-        "300",
-        "--timeout",
-        "0",
-        "--maxmemory-policy",
-        "noeviction",
-        "--save",
-        "900",
-        "1",
-        "--save",
-        "300",
-        "10",
-        "--save",
-        "60",
-        "10000",
-        "--notify-keyspace-events",
-        "Ex",
-        "--hash-max-ziplist-entries",
-        "512",
-        "--hash-max-ziplist-value",
-        "64",
-        "--list-max-ziplist-size",
-        "-2",
-        "--set-max-intset-entries",
-        "512",
       ]
     environment:
-      REDIS_PASSWORD: ${REDIS_PASSWORD}
-      TZ: America/Sao_Paulo
+      - REDIS_PASSWORD=${REDIS_PASSWORD}
+      - TZ=America/Sao_Paulo
     volumes:
       - redis_volume:/data
     networks:
       - network_public
     healthcheck:
-      test: ["CMD-SHELL", "valkey-cli -a ${REDIS_PASSWORD} ping | grep PONG"]
+      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD}", "ping"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -194,18 +121,17 @@ services:
     container_name: whaticket-rabbitmq
     restart: unless-stopped
     environment:
-      RABBITMQ_DEFAULT_USER: ${RABBIT_USER}
-      RABBITMQ_DEFAULT_PASS: ${RABBIT_PASS}
-      TZ: America/Sao_Paulo
+      - RABBITMQ_DEFAULT_USER=${RABBIT_USER}
+      - RABBITMQ_DEFAULT_PASS=${RABBIT_PASS}
+      - TZ=America/Sao_Paulo
     volumes:
-      - ./config/rabbitmq/rabbitmq.conf:/etc/rabbitmq/rabbitmq.conf:ro
       - rabbitmq_volume:/var/lib/rabbitmq
     networks:
       - network_public
     healthcheck:
-      test: ["CMD", "rabbitmq-diagnostics", "ping"]
-      interval: 10s
-      timeout: 5s
+      test: ["CMD", "rabbitmqctl", "status"]
+      interval: 30s
+      timeout: 10s
       retries: 5
       start_period: 30s
     ulimits:
@@ -293,13 +219,6 @@ services:
       - backend_public:/backend/public
     networks:
       - network_public
-    # healthcheck:
-    #   test:
-    #     ["CMD-SHELL", "curl -s http://localhost:8080/ | grep -q 'Cannot GET /'"]
-    #   interval: 30s
-    #   timeout: 10s
-    #   retries: 5
-    #   start_period: 120s
     depends_on:
       whaticket-postgres:
         condition: service_healthy
