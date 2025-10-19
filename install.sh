@@ -701,29 +701,6 @@ sync_config_templates() {
   echo_success "Configurações auxiliares atualizadas em '$config_dir'."
 }
 
-generate_rabbitmq_config() {
-  echo_info "Gerando arquivo de configuração do RabbitMQ..."
-  
-  local rabbitmq_dir="$APP_DIR/config/rabbitmq"
-  mkdir -p "$rabbitmq_dir"
-
-  local source_template="$CONFIG_TEMPLATE_DIR/rabbitmq/rabbitmq.conf"
-  local target_file="$rabbitmq_dir/rabbitmq.conf"
-
-  if [ ! -f "$source_template" ]; then
-    echo_warning "Template do RabbitMQ não encontrado em '$source_template'. Pulando geração."
-    return
-  fi
-
-  # Copia o template e substitui as variáveis
-  cp -f "$source_template" "$target_file"
-  sed -i "s/\${RABBIT_USER}/${RABBIT_USER}/g" "$target_file"
-  sed -i "s/\${RABBIT_PASS}/${RABBIT_PASS}/g" "$target_file"
-
-  echo_success "Arquivo de configuração do RabbitMQ gerado:"
-  echo_info "  - $target_file"
-}
-
 generate_pgbouncer_config() {
   echo_info "Gerando arquivos de configuração do PgBouncer..."
   
@@ -1055,7 +1032,6 @@ run_new_ghcr_installation() {
   copy_docker_compose_template_and_adjust
   sync_config_templates
   generate_pgbouncer_config
-  generate_rabbitmq_config
   docker_login
   docker_compose_pull
   docker_compose_up
@@ -1072,7 +1048,6 @@ run_update_ghcr_installation() {
   copy_docker_compose_template_and_adjust
   sync_config_templates
   generate_pgbouncer_config
-  generate_rabbitmq_config
   docker_login
   docker_compose_pull
   docker_compose_up
@@ -1158,7 +1133,6 @@ run_new_local_build_installation() {
   build_local_images
   sync_config_templates
   generate_pgbouncer_config
-  generate_rabbitmq_config
   docker_compose_up
   echo_success "Nova Instalação (Build Local) concluída!"
   show_post_install_info
@@ -1174,7 +1148,6 @@ run_update_local_build_installation() {
   build_local_images
   sync_config_templates
   generate_pgbouncer_config
-  generate_rabbitmq_config
   docker_compose_up
   echo_success "Atualização da Instalação (Build Local) concluída!"
   show_post_install_info
