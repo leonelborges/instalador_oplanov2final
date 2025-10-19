@@ -890,6 +890,109 @@ collect_all_data_new_install() {
   generate_internal_secrets
 }
 
+collect_data_update_simplified() {
+  echo_info "Carregando configurações existentes para atualização..."
+  if ! load_env_file; then
+    echo_warning "Nenhum arquivo '$APP_DIR/$ENV_FILE' encontrado. Não é possível atualizar."
+    read -r -p "Deseja prosseguir com uma Nova Instalação? (s/N): " choice
+    if [[ "$choice" == "s" || "$choice" == "S" ]]; then
+      if [ "$OPERATION_TYPE" == "ghcr" ]; then
+        run_new_ghcr_installation
+      else
+        run_new_local_build_installation
+      fi
+      exit 0
+    else
+      echo_error "Atualização cancelada. Arquivo de configuração não encontrado."
+    fi
+  fi
+
+  echo ""
+  echo_info "${COLOR_CYAN}=== Atualização Simplificada ===${COLOR_RESET}"
+  echo_info "Apenas as informações essenciais serão solicitadas."
+  echo ""
+
+  # Perguntas específicas para cada tipo de operação
+  if [ "$OPERATION_TYPE" == "ghcr" ]; then
+    echo_info "Configuração do GHCR (GitHub Container Registry):"
+    
+    # Tag do Docker
+    DOCKER_TAG_OLD="$DOCKER_TAG_CURRENT"
+    get_environment_tag
+    if [ "$DOCKER_TAG" != "$DOCKER_TAG_OLD" ]; then
+      echo_info "Tag Docker (GHCR) alterada de '$DOCKER_TAG_OLD' para '$DOCKER_TAG'."
+    fi
+    
+    # Owner/Organização e Repositório
+    prompt_for_variable "GHCR_IMAGE_USER" "  Usuário/Organização do GitHub para as imagens" "${GHCR_IMAGE_USER_CURRENT}" "oplanov2-entrega" "oplanov2-entrega"
+    prompt_for_variable "GHCR_IMAGE_REPO" "  Nome do Repositório no GitHub para as imagens" "${GHCR_IMAGE_REPO_CURRENT}" "entrega-oplanov2" "entrega-oplanov2"
+    
+  else
+    echo_info "Configuração do Repositório Git para Build Local:"
+    prompt_for_variable "NODE_ENV" "  Ambiente de execução (NODE_ENV)" "${NODE_ENV_CURRENT:-production}" "production" "production ou development"
+    DOCKER_TAG="local"
+  fi
+
+  echo ""
+  # Pergunta se quer alterar outras configurações
+  read -r -p "Deseja alterar outras configurações (domínios, Facebook, Gerencianet, etc.)? (s/N): " change_other_configs
+  
+  if [[ "$change_other_configs" == "s" || "$change_other_configs" == "S" ]]; then
+    echo_info "Você pode revisar e alterar as configurações. Pressione Enter para manter o valor atual."
+    collect_traefik_email
+    collect_domains
+    collect_facebook_credentials
+    collect_gerencianet_credentials
+    collect_other_configs
+    
+    echo ""
+    echo_info "Credenciais de Banco de Dados, RabbitMQ e Redis:"
+    DB_NAME="$DB_NAME_CURRENT"
+    DB_USER="$DB_USER_CURRENT"
+    prompt_for_variable "DB_PASS" "  Senha do Banco de Dados (DB_PASS)" "" "" "Deixe em branco para NÃO alterar"
+    DB_PASS=${DB_PASS:-$DB_PASS_CURRENT}
+
+    RABBIT_USER="$RABBIT_USER_CURRENT"
+    prompt_for_variable "RABBIT_PASS" "  Senha do RabbitMQ (RABBIT_PASS)" "" "" "Deixe em branco para NÃO alterar"
+    RABBIT_PASS=${RABBIT_PASS:-$RABBIT_PASS_CURRENT}
+
+    prompt_for_variable "REDIS_PASSWORD" "  Senha do Redis" "${REDIS_PASSWORD_CURRENT}" "" "Deixe em branco para NÃO alterar"
+    REDIS_PASSWORD=${REDIS_PASSWORD:-$REDIS_PASSWORD_CURRENT}
+  else
+    # Carrega todas as configurações existentes sem perguntar
+    echo_info "Mantendo todas as configurações existentes..."
+    
+    EMAIL="$EMAIL_CURRENT"
+    FRONTEND_DOMAIN="$FRONTEND_DOMAIN_CURRENT"
+    BACKEND_DOMAIN="$BACKEND_DOMAIN_CURRENT"
+    
+    FACEBOOK_APP_ID="$FACEBOOK_APP_ID_CURRENT"
+    FACEBOOK_APP_SECRET="$FACEBOOK_APP_SECRET_CURRENT"
+    VERIFY_TOKEN="$VERIFY_TOKEN_CURRENT"
+    REQUIRE_BUSINESS_MANAGEMENT="$REQUIRE_BUSINESS_MANAGEMENT_CURRENT"
+    
+    GERENCIANET_SANDBOX="$GERENCIANET_SANDBOX_CURRENT"
+    GERENCIANET_CLIENT_ID="$GERENCIANET_CLIENT_ID_CURRENT"
+    GERENCIANET_CLIENT_SECRET="$GERENCIANET_CLIENT_SECRET_CURRENT"
+    GERENCIANET_CHAVEPIX="$GERENCIANET_CHAVEPIX_CURRENT"
+    GERENCIANET_PIX_CERT="$GERENCIANET_PIX_CERT_CURRENT"
+    
+    MASTER_KEY="$MASTER_KEY_CURRENT"
+    NUMBER_SUPPORT="$NUMBER_SUPPORT_CURRENT"
+    
+    DB_NAME="$DB_NAME_CURRENT"
+    DB_USER="$DB_USER_CURRENT"
+    DB_PASS="$DB_PASS_CURRENT"
+    
+    RABBIT_USER="$RABBIT_USER_CURRENT"
+    RABBIT_PASS="$RABBIT_PASS_CURRENT"
+    
+    REDIS_PASSWORD="$REDIS_PASSWORD_CURRENT"
+  fi
+
+  generate_internal_secrets
+}
+
 collect_data_update() {
   echo_info "Carregando configurações existentes para atualização..."
   if ! load_env_file; then
@@ -963,7 +1066,7 @@ run_new_ghcr_installation() {
 run_update_ghcr_installation() {
   OPERATION_TYPE="ghcr"
   echo_info "Iniciando Atualização da Instalação (Imagens Remotas GHCR)..."
-  collect_data_update
+  collect_data_update_simplified
   show_summary_and_confirm
   save_env_file
   copy_docker_compose_template_and_adjust
@@ -1065,7 +1168,7 @@ run_update_local_build_installation() {
   OPERATION_TYPE="local_build"
   echo_info "Iniciando Atualização da Instalação (Build Local das Imagens)..."
   setup_local_repo
-  collect_data_update
+  collect_data_update_simplified
   show_summary_and_confirm
   save_env_file
   build_local_images
