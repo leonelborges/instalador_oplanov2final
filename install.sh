@@ -52,10 +52,38 @@ check_command() {
 install_docker() {
   if ! check_command "docker"; then
     echo_info "Instalando Docker..."
-    curl -fsSL https://get.docker.com -o install-docker.sh
-    sudo sh install-docker.sh --channel stable
+    local docker_version="5:28.5.2-1~ubuntu.22.04~jammy"
+    local codename
+    if command -v lsb_release >/dev/null 2>&1; then
+      codename=$(lsb_release -cs)
+    else
+      codename="jammy"
+    fi
+
+    sudo apt-get update
+    sudo apt-get install -y ca-certificates curl gnupg
+
+    if [ ! -f /etc/apt/keyrings/docker.gpg ]; then
+      sudo install -m 0755 -d /etc/apt/keyrings
+      curl -fsSL https://download.docker.com/linux/ubuntu/gpg | sudo gpg --dearmor -o /etc/apt/keyrings/docker.gpg
+      sudo chmod a+r /etc/apt/keyrings/docker.gpg
+    fi
+
+    if ! grep -q "download.docker.com" /etc/apt/sources.list.d/docker.list 2>/dev/null; then
+      echo_info "Adicionando repositório oficial do Docker..."
+      echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu $codename stable" | sudo tee /etc/apt/sources.list.d/docker.list >/dev/null
+    fi
+
+    sudo apt-get update
+    sudo apt-get install -y \
+      docker-ce="$docker_version" \
+      docker-ce-cli="$docker_version" \
+      containerd.io \
+      docker-buildx-plugin \
+      docker-compose-plugin
+
+    sudo apt-mark hold docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
     sudo usermod -aG docker "$USER" || echo_warning "Falha ao adicionar usuário ao grupo docker. Você pode precisar reiniciar sua sessão."
-    rm install-docker.sh
     echo_success "Docker instalado."
     echo_info "Por favor, faça logout e login novamente ou reinicie o sistema para que as alterações no grupo docker tenham efeito, ou execute 'newgrp docker' no terminal atual."
   fi
